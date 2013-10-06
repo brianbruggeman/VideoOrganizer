@@ -1,32 +1,37 @@
 #!/usr/bin/env python
 import os
 import re
+import shutil
+import stat
 import traceback
 
-def gather_files(fpath=None, ignore_list=[]):
+
+def gather_files(fpath=None, ignore_list=None):
+    """Captures a list of files
+    """
     items = []
     fpath = os.path.abspath(os.getcwd()) if not fpath else fpath
-    if not ignore_list:
+    if ignore_list is None:
         ignore_list = ['Pics', 'Series', 'Programs', 'Movies']
     if os.path.exists(fpath) and os.listdir(fpath):
         item_generate =(os.path.join(fpath, f)
                         for f in os.listdir(fpath)
-                        if f not in ignore_list
+                        # if fpath not in ignore_list
                         if os.path.isfile(os.path.join(fpath, f)))
         items.extend(item_generate)
     elif os.path.exists(fpath) and not os.listdir(fpath):
-        os.removedirs(folder_path)
+        remove(folder_path)
     for root, folders, files in os.walk(fpath):
         for folder in folders:
             folder_path = os.path.join(root, folder)
             if os.path.exists(folder_path) and os.listdir(folder_path):
                 item_generate =(os.path.join(folder_path, f)
                                 for f in os.listdir(folder_path)
-                                if f not in ignore_list
+                                # if folder not in ignore_list
                                 if os.path.isfile(os.path.join(folder_path, f)))
                 items.extend(item_generate)
             elif os.path.exists(folder_path) and not os.listdir(folder_path):
-                os.removedirs(folder_path)
+                remove(folder_path)
     return items
 
 def fix_name(name):
@@ -63,39 +68,58 @@ def determine_new_path(fpath, cwd=None):
         new_path = os.path.join(cwd, new_path)
     return new_path
 
+def on_remove_error(function, path, excinfo):
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        function(path)
+    else:
+        print "Used '%s' and couldn't remove: %s" % (function, path)
+        print traceback.format_exc()
+        import pdb; pdb.set_trace()
+
+
+def remove(path):
+    if os.path.exists(path):
+        if os.path.isfile(path):
+            if not os.access(path, os.W_OK):
+                os.chmod(path, stat.S_IWUSR)
+            os.remove(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path, onerror=on_remove_error)
+        if os.path.exists(path):
+            print "WARNING:  Couldn't remove '%s'" % path
+    else:
+        print "INFO:  Couldn't find '%s'" % path
+        
+
 def rename_file(fpath, cwd=None):
+    """Renames a file -- specifically to the following format:
+        <show>.<season>.<episode>.<format>
+
+    If the file does not conform to the season format, it assumes
+    that the file is a movie.  All other files are ignored.
+    """
     cwd = os.getcwd() if cwd == None else cwd
     ext = os.path.splitext(fpath)[-1]
+    oldpath = os.path.dirname(fpath) if os.path.isfile(fpath) else fpath
     video_files = ['avi', 'mkv', 'mp4', 'm4v']
     trash = ['txt', 'nfo']
     new_path = fpath
     dirpath = os.path.dirname(fpath)
+    video_file = False
     if ext.replace('.', '') in video_files:
+        video_file = True
         new_name = fix_name(fpath)
         new_path = determine_new_path(new_name, cwd)
         if fpath and new_path and fpath != new_path:
             dirpath = os.path.dirname(new_path)
             if not os.path.exists(dirpath):
                 os.makedirs(dirpath)
-            if os.path.exists(new_path):
-                os.remove(new_path)
-            try:
-                os.rename(fpath, new_path)
-            except:
-                print traceback.format_exc()
-            if os.path.exists(dirpath):
-                files = os.listdir(dirpath)
-                for file in files:
-                    fileext = os.path.splitext(file)[-1]
-                if not files:
-                    os.removedirs(dirpath)
+            remove(new_path)
+            os.rename(fpath, new_path)
     elif ext.replace('.', '') in trash:
-        try:
-            os.remove(fpath)
-        except:
-            pass
-        print 'Removed: %s' % fpath
-    return new_path
+        remove(fpath)
+    return new_path, video_file
 
 def get_season(fpath):
     """Return a dictionary with a path that includes season and show title
@@ -175,27 +199,41 @@ def cleanup(fpath=None, keep=[]):
         for file in files:
             full_path = os.path.join(root, file)
             if full_path not in keep:
-                try:
-                    os.remove(full_path)
-                except:
-                    print "Couldn't remove: %s" % full_path
+                if os.path.exists(full_path):
+                    remove(full_path)
         for folder in folders:
             full_path = os.path.join(root, folder)
             paths.append(full_path)
     for path in paths:
         if os.path.isdir(path) and path not in keep:
-            try:
-                os.removedirs(path)            
-            except:
-                print "Couldn't remove: %s" % path
+            remove(path)            
+
+def get_ancestor_paths(path):
+    """Returns a list of ancestors for a given path
+    """
+    ancestors = []
+    if os.path.exists(path):
+        ancestors.append(path)
+        path = os.path.dirname(path)
+        if path[-2:] != ":\\":
+            ancestors.extend(get_ancestor_paths(path))
+    return ancestors
 
 if __name__ == "__main__":
     try:
-        for idx, fpath in enumerate(gather_files()):
-            new_name = rename_file(fpath)
+        keep = [os.path.abspath(__file__)]
+        files = gather_files()
+        for idx, fpath in enumerate(files):
+            new_name, video_file = rename_file(fpath)
+            if video_file:
+                keep.append(new_name)
+                for path in get_ancestor_paths(new_name):
+                    if path not in keep:
+                        keep.append(path)
+                keep.append(os.path.dirname(new_name))
             if fpath != new_name:
                 print "[%02d] %s --> %s" % (idx+1, fpath, new_name)
-        cleanup()
+        cleanup(keep=keep)
     except Exception, exc:
         print traceback.format_exc()
         raw_input("Enter to continue...")
