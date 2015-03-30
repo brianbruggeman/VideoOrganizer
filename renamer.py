@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import sys
 import re
 import shutil
 import stat
@@ -14,30 +15,30 @@ def gather_files(fpath=None, ignore_list=None):
     if ignore_list is None:
         ignore_list = ['Pics', 'Series', 'Programs', 'Movies']
     if os.path.exists(fpath) and os.listdir(fpath):
-        item_generate =(os.path.join(fpath, f)
-                        for f in os.listdir(fpath)
-                        # if fpath not in ignore_list
-                        if os.path.isfile(os.path.join(fpath, f)))
+        item_generate = (os.path.join(fpath, f)
+                         for f in os.listdir(fpath)
+                         if f not in ignore_list
+                         if os.path.isfile(os.path.join(fpath, f)))
         items.extend(item_generate)
-    elif os.path.exists(fpath) and not os.listdir(fpath):
-        remove(folder_path)
     for root, folders, files in os.walk(fpath):
         for folder in folders:
             folder_path = os.path.join(root, folder)
             if os.path.exists(folder_path) and os.listdir(folder_path):
-                item_generate =(os.path.join(folder_path, f)
-                                for f in os.listdir(folder_path)
-                                # if folder not in ignore_list
-                                if os.path.isfile(os.path.join(folder_path, f)))
+                item_generate = (os.path.join(folder_path, f)
+                                 for f in os.listdir(folder_path)
+                                 # if folder not in ignore_list
+                                 if os.path.isfile(
+                    os.path.join(folder_path, f)))
                 items.extend(item_generate)
             elif os.path.exists(folder_path) and not os.listdir(folder_path):
                 remove(folder_path)
     return items
 
+
 def fix_name(name):
     """Remove the ridiculous addendums that people add to the files
     """
-    ignore_list = ['hdtv', 'x264', '[', '720p', 'the', 'kablam!!!', 'xvid', 
+    ignore_list = ['hdtv', 'x264', '[', '720p', 'the', 'kablam!!!', 'xvid',
                    'brrip', 'dvd', 'aac', 'yify', '1080p', 'ac3-', 'webrip',
                    'ac3', 'dvdrip', 'brrip', 'bluray', 'dvdscr']
     bname = os.path.basename(name)
@@ -53,20 +54,23 @@ def fix_name(name):
                 keep = False
                 break
         if keep:
-            new_name.append(n)
+            if ".".join(n.split('.')[0:-1]).lower() != 'sample':
+                new_name.append(n)
     bname = ".".join(new_name)
-    bname = bname.replace('..','.')
-    bname = bname.replace('.-.','.')
+    bname = bname.replace('..', '.')
+    bname = bname.replace('.-.', '.')
     name = os.path.join(dname, bname) if dname else bname
     return name
 
+
 def determine_new_path(fpath, cwd=None):
-    cwd = os.getcwd() if cwd == None else cwd
+    cwd = os.getcwd() if cwd is None else cwd
     season = get_season(fpath)
     new_path = season.get('filepath', fpath)
     if new_path != fpath:
         new_path = os.path.join(cwd, new_path)
     return new_path
+
 
 def on_remove_error(function, path, excinfo):
     if not os.access(path, os.W_OK):
@@ -75,22 +79,24 @@ def on_remove_error(function, path, excinfo):
     else:
         print "Used '%s' and couldn't remove: %s" % (function, path)
         print traceback.format_exc()
-        import pdb; pdb.set_trace()
 
 
-def remove(path):
-    if os.path.exists(path):
-        if os.path.isfile(path):
-            if not os.access(path, os.W_OK):
-                os.chmod(path, stat.S_IWUSR)
-            os.remove(path)
-        elif os.path.isdir(path):
-            shutil.rmtree(path, onerror=on_remove_error)
+def remove(path, skip=True):
+    if skip:
         if os.path.exists(path):
-            print "WARNING:  Couldn't remove '%s'" % path
-    else:
-        print "INFO:  Couldn't find '%s'" % path
-        
+            if os.path.isfile(path):
+                if not os.access(path, os.W_OK):
+                    os.chmod(path, stat.S_IWUSR)
+                os.remove(path)
+            elif os.path.islink(path):
+                if not os.access(path, os.W_OK):
+                    os.chmod(path, stat.S_IWUSR)
+                os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path, onerror=on_remove_error)
+            if os.path.exists(path):
+                print "WARNING:  Couldn't remove '%s'" % path
+
 
 def rename_file(fpath, cwd=None):
     """Renames a file -- specifically to the following format:
@@ -99,9 +105,8 @@ def rename_file(fpath, cwd=None):
     If the file does not conform to the season format, it assumes
     that the file is a movie.  All other files are ignored.
     """
-    cwd = os.getcwd() if cwd == None else cwd
+    cwd = os.getcwd() if cwd is None else cwd
     ext = os.path.splitext(fpath)[-1]
-    oldpath = os.path.dirname(fpath) if os.path.isfile(fpath) else fpath
     video_files = ['avi', 'mkv', 'mp4', 'm4v']
     trash = ['txt', 'nfo']
     new_path = fpath
@@ -121,34 +126,36 @@ def rename_file(fpath, cwd=None):
         remove(fpath)
     return new_path, video_file
 
+
 def get_season(fpath):
     """Return a dictionary with a path that includes season and show title
     """
     match = {}
-    display = False
-    if 'bang' in fpath and '604' in fpath:
-        display = True
-    name_pattern = "^(?P<name>[a-z_A-Z0-9.]{1,})"  # name
+    name_pattern = "^(?P<name>[a-z_A-Z0-9.-]{1,})"  # name
     # yeara_pattern = "([.](?P<yeara>(20[0-2]{1}[0-9]{1}|19[0-9]{2})))?"
     # yearb_pattern = "([.](?P<yearb>(20[0-2]{1}[0-9]{1}|19[0-9]{2})))?"
     desc_pattern = "([.](?P<desc>.*))?"  # description of episode
     ext_pattern = "[.](?P<ext>[a-zA-Z_0-9]{3,})$"  # mp4, mkv, etc.
     patterns = []
-    patterns.append("[.](?P<season>(s([0-9]{1,})))[.]?(?P<episode>(e([0-9]{1,})){1,})")
-    patterns.append("[.](?P<season>(season[.]([0-9]{1,})))[.](?P<episode>(episode[.]([0-9]{1,})){1,})")
+    patterns.append(
+        "[.](?P<season>(s([0-9]{1,})))[.]?(?P<episode>(e([0-9]{1,})){1,})")
+    patterns.append(
+        "[.](?P<season>(season[.]([0-9]{1,})))"
+        "[.](?P<episode>(episode[.]([0-9]{1,})){1,})")
     patterns.append("[.](?P<season>([0-9]{1}))x(?P<episode>([0-9]{2}))")
     patterns.append("[.](?P<season>([0-9]{1}))(?P<episode>([0-9]{2}))")
     patterns.append("[.](?P<season>([0-9]{2}))x(?P<episode>([0-9]{2}))")
-    patterns.append("[.](?P<season>(s([0-9]{1,})))[.]?(?P<episode>(e([0-9]{1,})[-]e([0-9]{1,})))")
-    patterns.append("[.](?P<season>(s([0-9]{1,})))[.]?(?P<episode>(e([0-9]{1,})[-]([0-9]{1,})))")
-    matched = False
+    patterns.append(
+        "[.](?P<season>(s([0-9]{1,})))[.]?"
+        "(?P<episode>(e([0-9]{1,})[-]e([0-9]{1,})))")
+    patterns.append(
+        "[.](?P<season>(s([0-9]{1,})))[.]?"
+        "(?P<episode>(e([0-9]{1,})[-]([0-9]{1,})))")
     file = os.path.basename(fpath)
-    dpath = os.path.basename(fpath)
     for number, pattern in enumerate(patterns):
         episode_patt = name_pattern + pattern + desc_pattern + ext_pattern
         episode_eng = re.compile(episode_patt)
         if episode_eng.match(file):
-            matched = True
             match = [m.groupdict() for m in episode_eng.finditer(file)][0]
             season = match.get('season', '')
             if "s" not in season:
@@ -156,7 +163,7 @@ def get_season(fpath):
             elif "season" in season:
                 season = "s%02d" % int(season.split('.')[-1])
             if season:
-                match['season'] = season 
+                match['season'] = season
             episode = match.get('episode', '')
             if "e" not in episode:
                 episode = "e%02d" % int(episode)
@@ -172,7 +179,8 @@ def get_season(fpath):
             match['movie'] = False
             if not season and not episode:
                 match['movie'] = True
-            rpath = "".join([n[0].upper()+n[1:] for n in match.get('name').split('.')])
+            rpath = "".join([n[0].upper() + n[1:]
+                             for n in match.get('name').split('.')])
             match['rpath'] = os.path.join('Series', rpath, match.get('season'))
             if match.get('movie'):
                 match['rpath'] = 'Movies'
@@ -189,11 +197,12 @@ def get_season(fpath):
         match['filepath'] = os.path.join(*new_name)
     return match
 
+
 def cleanup(fpath=None, keep=[]):
-    """Remove any files and folders found within the path except those 
+    """Remove any files and folders found within the path except those
         found in keep
     """
-    fpath = os.getcwd() if fpath == None else fpath
+    fpath = os.getcwd() if fpath is None else fpath
     paths = []
     for root, folders, files in os.walk(fpath, topdown=False):
         for file in files:
@@ -206,18 +215,26 @@ def cleanup(fpath=None, keep=[]):
             paths.append(full_path)
     for path in paths:
         if os.path.isdir(path) and path not in keep:
-            remove(path)            
+            remove(path)
+
 
 def get_ancestor_paths(path):
     """Returns a list of ancestors for a given path
     """
     ancestors = []
+    stop_val = "/"
+    if "darwin" in sys.platform:
+        stop_val = "/"
+    elif "win" in sys.platform:
+        stop_val = ":\\"
+    stop_len = len(stop_val) * -1
     if os.path.exists(path):
         ancestors.append(path)
         path = os.path.dirname(path)
-        if path[-2:] != ":\\":
+        if path[stop_len:] != stop_val:
             ancestors.extend(get_ancestor_paths(path))
     return ancestors
+
 
 if __name__ == "__main__":
     try:
@@ -232,7 +249,7 @@ if __name__ == "__main__":
                         keep.append(path)
                 keep.append(os.path.dirname(new_name))
             if fpath != new_name:
-                print "[%02d] %s --> %s" % (idx+1, fpath, new_name)
+                print "[%02d] %s --> %s" % (idx + 1, fpath, new_name)
         cleanup(keep=keep)
     except Exception, exc:
         print traceback.format_exc()
